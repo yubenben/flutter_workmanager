@@ -77,34 +77,58 @@ class BackgroundWorker(
             null,
             Handler(Looper.getMainLooper()),
         ) {
-            val callbackHandle = SharedPreferenceHelper.getCallbackHandle(applicationContext)
-            val callbackInfo = FlutterCallbackInformation.lookupCallbackInformation(callbackHandle)
-            val dartBundlePath = flutterLoader.findAppBundlePath()
 
-            if (isInDebug) {
-                DebugHelper.postTaskStarting(
-                    applicationContext,
-                    randomThreadIdentifier,
-                    dartTask,
-                    payload,
-                    callbackHandle,
-                    callbackInfo,
-                    dartBundlePath,
-                )
-            }
+            try {
+                val callbackHandle = SharedPreferenceHelper.getCallbackHandle(applicationContext)
+                val callbackInfo = FlutterCallbackInformation.lookupCallbackInformation(callbackHandle)
 
-            engine?.let { engine ->
-                backgroundChannel = MethodChannel(engine.dartExecutor, BACKGROUND_CHANNEL_NAME)
-                backgroundChannel.setMethodCallHandler(this@BackgroundWorker)
+                // 检查 callbackInfo 是否为 null，防止 NullPointerException
+                if (callbackInfo == null) {
+                    throw NullPointerException("callbackInfo is null")
+                }
 
-                engine.dartExecutor.executeDartCallback(
-                    DartExecutor.DartCallback(
-                        applicationContext.assets,
-                        dartBundlePath,
+                val dartBundlePath = flutterLoader.findAppBundlePath()
+
+                if (isInDebug) {
+                    DebugHelper.postTaskStarting(
+                        applicationContext,
+                        randomThreadIdentifier,
+                        dartTask,
+                        payload,
+                        callbackHandle,
                         callbackInfo,
-                    ),
-                )
+                        dartBundlePath,
+                    )
+                }
+
+                engine?.let { engine ->
+                    backgroundChannel = MethodChannel(engine.dartExecutor, BACKGROUND_CHANNEL_NAME)
+                    backgroundChannel.setMethodCallHandler(this@BackgroundWorker)
+
+                    try {
+                        engine.dartExecutor.executeDartCallback(
+                            DartExecutor.DartCallback(
+                                applicationContext.assets,
+                                dartBundlePath,
+                                callbackInfo,
+                            )
+                        )
+                    } catch (e: Exception) {
+                        // 捕获执行 Dart 回调时的异常
+                        Log.e("WorkManager", "Error executing Dart callback", e)
+                        resolvableFuture.set(Result.failure())  // 如果有错误，则返回失败
+                    }
+                }
+            } catch (e: NullPointerException) {
+                // 捕获可能的 NullPointerException
+                Log.e("WorkManager", "NullPointerException caught during initialization", e)
+                resolvableFuture.set(Result.failure())  // 如果有错误，则返回失败
+            } catch (e: Exception) {
+                // 捕获其他可能的异常
+                Log.e("WorkManager", "Exception caught during initialization", e)
+                resolvableFuture.set(Result.failure())  // 如果有错误，则返回失败
             }
+         
         }
 
         return resolvableFuture
